@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netinet/if_ether.h>
 
 #define TABLE_INITIAL_SIZE 256
 
@@ -46,7 +47,7 @@ int add_entry(struct table* table, void* cell, size_t cell_type);
 
 int read_route_table(struct table* table, const char* in);
 void sort_route_table(struct table* table);
-uint32_t get_next_hop(struct table* table, uint32_t destination);
+int get_next_hop(struct table* table, uint32_t destination);
 void print_route_table(struct table* table);
 
 #endif

@@ -7,7 +7,9 @@ int main(int argc, char *argv[])
 	struct in_addr addr;
 
 	struct table* rtable = create_table(route);
-	if (!rtable) {
+	struct table* arp_table = create_table(arp);
+
+	if (!rtable || !arp_table) {
 		fprintf(stderr, "Cannot allocate memory for routing table.\n");
 		return -1;
 	}
@@ -39,7 +41,50 @@ int main(int argc, char *argv[])
 			addr.s_addr = ip_hdr->saddr;
 			printf("\tcoming from: %s\n", inet_ntoa(addr));
 		} else if (protocol == ETHERTYPE_ARP) {
-			printf("\tIt's an ARP packet!\n");
+			struct ether_arp* arp_hdr =
+				(struct ether_arp*)(m.payload + sizeof(struct ether_header));
+
+			uint8_t op = htons((arp_hdr->ea_hdr).ar_op);
+			if (op == ARPOP_REQUEST) {
+				/* ARP Request */
+				printf("\tIt's an ARP Request!\n");
+				// addr.s_addr = htonl(*((uint32_t*)arp_hdr->arp_tpa));
+
+				/* Looking for router's MAC address */
+				struct in_addr* router_iface_ip = malloc(sizeof(struct in_addr));
+
+				printf("\trouter ip: %s\n", get_interface_ip(m.interface));
+				addr.s_addr = *((uint32_t*)arp_hdr->arp_tpa);
+				printf("\ttarget: %s\n", inet_ntoa(addr));
+
+
+				// if (htonl(inet_aton(get_interface_ip(
+				// 	m.interface), router_iface_ip)) == addr.s_addr)
+				// 	{
+				if (strcmp(get_interface_ip(m.interface), inet_ntoa(addr)) == 0) {
+
+					printf("got here\n");
+					uint32_t aux = *(uint32_t*)(arp_hdr->arp_tpa);
+					*(uint32_t*)(arp_hdr->arp_tpa) = *(uint32_t*)(arp_hdr->arp_spa);
+					*(uint32_t*)(arp_hdr->arp_spa) = aux;
+
+					for (size_t i = 0; i < 6; i++) {
+						arp_hdr->arp_tha[i] = arp_hdr->arp_sha[i];
+						eth_hdr->ether_dhost[i] = arp_hdr->arp_sha[i];
+					}
+
+					get_interface_mac(m.interface, eth_hdr->ether_shost);
+					get_interface_mac(m.interface, arp_hdr->arp_sha);
+
+					arp_hdr->ea_hdr.ar_op = htons(ARPOP_REPLY);
+				}
+
+				free(router_iface_ip);
+				send_packet(m.interface, &m);
+			} else if (op == ARPOP_REPLY) {
+				/* ARP Reply */
+				printf("\tIt's an ARP reply!\n");
+			}
 		}
 	}
 
