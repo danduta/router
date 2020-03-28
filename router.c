@@ -37,11 +37,10 @@ int main(int argc, char *argv[])
 		uint32_t protocol = htons(eth_hdr->ether_type);
 		/* IP */
 		if (protocol == ETHERTYPE_IP) {
-			fprintf(stdout, "\tIt's an IP packet..\n");
 			struct iphdr* ip_hdr =
 				(struct iphdr*)(m.payload + sizeof(struct ether_header));
-			struct icmphdr* icmp_hdr =
-				(struct icmphdr*)(ip_hdr + sizeof(struct iphdr));
+			struct icmphdr* icmp_hdr = (struct icmphdr*)(m.payload 	+
+				sizeof(struct ether_header) + sizeof(struct iphdr));
 
 			fprintf (stdout, "\tIt's an IP packet coming on interface %d ip %s!\n",
 							m.interface, get_interface_ip(m.interface));
@@ -53,14 +52,11 @@ int main(int argc, char *argv[])
 			inet_aton(get_interface_ip(m.interface), router_ip);
 			uint32_t router = router_ip->s_addr;
 
-			printf("\tis echo req???: %u\n", (icmp_hdr->type));
 			if (	target == router &&
 						ip_hdr->protocol == 1 &&
-						icmp_hdr->type == htons(ICMP_ECHO)) {
+						icmp_hdr->type == ICMP_ECHO) {
 				/* ICMP Echo request */
 				printf("\tIt's an ICMP Echo request to the router!\n");
-
-
 				/* Update ICMP type to ECHOREPLY */
 				icmp_hdr->type = htons(ICMP_ECHOREPLY);
 				/* Switch destination and source IP in IP header */
@@ -108,7 +104,7 @@ int main(int argc, char *argv[])
 			 	fprintf (stdout, "\tIt's an ARP Request coming on interface %d ip %s!\n",
 								m.interface, get_interface_ip(m.interface));
 				addr.s_addr = *(uint32_t*)(arp_hdr->arp_tpa);
-				printf("\ttarget ip: %s\n", inet_ntoa(addr));
+				printf("\ttarget ip: %s\n", inet_ntoa(saddr));
 
 				uint32_t target = *(uint32_t*)(arp_hdr->arp_tpa);
 				struct in_addr* router_ip = malloc(sizeof(struct in_addr));
@@ -116,7 +112,7 @@ int main(int argc, char *argv[])
 				uint32_t router = router_ip->s_addr;
 
 				if (target == router) {
-					printf("\ttarget: %s == router: %s\n", inet_ntoa(addr), get_interface_ip(m.interface));
+					fprintf(stdout, "\tARP Request is targetting router\n");
 					/* Switch target and source IP */
 					uint32_t aux = *(uint32_t*)(arp_hdr->arp_tpa);
 					*(uint32_t*)(arp_hdr->arp_tpa) = *(uint32_t*)(arp_hdr->arp_spa);
