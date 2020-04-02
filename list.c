@@ -11,7 +11,7 @@ list cons(void *element, list l)
 
 list cdr_and_free(list l)
 {
-	list temp = l->next; 
+	list temp = l->next;
 	free(l);
 	return temp;
 }

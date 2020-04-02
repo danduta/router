@@ -25,8 +25,6 @@
 #include <net/if_arp.h>
 #include <asm/byteorder.h>
 
-#include "table.h"
-
 /*
  *Note that "buffer" should be at least the MTU size of the
  * interface, eg 1500 bytes

@@ -178,7 +178,7 @@ def main(run_tests=False):
     total = 0
     print("{:=^80}\n".format(" Running tests "))
     if run_tests:
-        for testname in tests.TESTS:
+        for testname in ["router_arp_reply", "router_arp_request"]:
             skipped = False
 
             if should_skip(testname):

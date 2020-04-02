@@ -1,4 +1,6 @@
 #include "skel.h"
+#include "table.h"
+#include "queue.h"
 
 int main(int argc, char *argv[])
 {
@@ -8,6 +10,8 @@ int main(int argc, char *argv[])
 
 	struct table* rtable = create_table(route);
 	struct table* arp_table = create_table(arp);
+	queue q;
+	q = queue_create();
 
 	if (!rtable || !arp_table) {
 		fprintf(stderr, "Cannot allocate memory for routing table.\n");
@@ -19,7 +23,7 @@ int main(int argc, char *argv[])
 		return -2;
 	}
 
-	sort_route_table(rtable);
+	sort_table(rtable, route);
 	init();
 
 	for (int i = 0; i < 4; i++) {
@@ -52,11 +56,45 @@ int main(int argc, char *argv[])
 			inet_aton(get_interface_ip(m.interface), router_ip);
 			uint32_t router = router_ip->s_addr;
 
+			uint8_t reply_type = 0xff;
+			// printf("target: %s router: ", inet_ntoa(addr));
+			// printf("%s\n", inet_ntoa(*router_ip));
+			int index;
+
+			size_t buffer_size = 	m.len -
+														sizeof(struct ether_header) -
+														sizeof(struct iphdr) -
+														sizeof(struct icmphdr);
+			char* buffer = malloc(buffer_size + 1);
+
+			memcpy (buffer,
+							m.payload +
+								sizeof(struct ether_header) +
+								sizeof(struct iphdr) +
+								sizeof(struct icmphdr),
+							buffer_size);
+
 			if (	target == router &&
 						ip_hdr->protocol == 1 &&
 						icmp_hdr->type == ICMP_ECHO) {
-				/* ICMP Echo request */
-				printf("\tIt's an ICMP Echo request to the router!\n");
+				/* ICMP Echo request to the router*/
+				reply_type = ICMP_ECHOREPLY;
+				printf("\tIt's an ICMP Echo request to the router! %u\n", ICMP_ECHOREPLY);
+			} else if (ip_hdr->ttl <= 1) {
+				/* Compare TTL */
+				reply_type = ICMP_TIME_EXCEEDED;
+				printf("\tTTL exceeded! %u\n", ICMP_TIME_EXCEEDED);
+			} else if ((index = get_next_hop(rtable, htonl(ip_hdr->daddr))) < 0) {
+				/* Look for next hop */
+				reply_type = ICMP_DEST_UNREACH;
+				printf("\tNot found in rtable! %u\n", ICMP_DEST_UNREACH);
+			} else {
+				/* It's a valid packet */
+				printf("\tNext hop is: ");
+				print_route_entry(rtable, index);
+			}
+
+			if (reply_type == ICMP_ECHOREPLY) {
 				/* Update ICMP type to ECHOREPLY */
 				icmp_hdr->type = htons(ICMP_ECHOREPLY);
 				/* Switch destination and source IP in IP header */
@@ -69,43 +107,121 @@ int main(int argc, char *argv[])
 				}
 				get_interface_mac(m.interface, eth_hdr->ether_shost);
 
+				icmp_hdr->checksum = 0;
+				icmp_hdr->checksum = checksum(icmp_hdr, m.len - sizeof(struct ether_header) - sizeof(struct iphdr));
+
+				send_packet(m.interface, &m);
+			} else if (reply_type != 0xff) {
+				/* Sending back ICMP message */
+				printf("\tSending back ICMP message with type: %u\n", reply_type);
+				/* Update ICMP type to ECHOREPLY */
+				icmp_hdr->type = reply_type;
+				icmp_hdr->code = (reply_type == ICMP_DEST_UNREACH);
+				/* Change protocol to ICMP */
+				ip_hdr->protocol = 1;
+				/* Switch destination and source IP in IP header */
+				uint32_t aux = ip_hdr->saddr;
+				ip_hdr->saddr = ip_hdr->daddr;
+				ip_hdr->daddr = aux;
+				/* Update source and destination MAC in the Ethernet header */
+				for (size_t i = 0; i < 6; i++) {
+					eth_hdr->ether_dhost[i] = eth_hdr->ether_shost[i];
+				}
+				get_interface_mac(m.interface, eth_hdr->ether_shost);
+				/* Update IP and packet length */
+				ip_hdr->tot_len = htons(2 * sizeof(struct iphdr) +
+																sizeof(struct icmphdr) + 8);
+
+				m.len = sizeof(struct ether_header) +
+								2 * sizeof(struct iphdr) +
+								sizeof(struct icmphdr) + 8;
+				/* Update checksums */
+				ip_hdr->check = 0;
+				ip_hdr->check = checksum(ip_hdr, sizeof(struct iphdr));
+				icmp_hdr->checksum = 0;
+				// icmp_hdr->checksum = checksum(icmp_hdr, m.len - sizeof(struct ether_header) - sizeof(struct iphdr));
+				icmp_hdr->checksum = checksum(icmp_hdr, sizeof(struct icmphdr) + sizeof(struct iphdr) + 8);
+				/* Send packet */
+				memcpy (buffer,
+								m.payload + sizeof(struct ether_header),
+								8 + sizeof(struct iphdr));
+
+				memcpy (m.payload +
+									sizeof(struct ether_header) +
+									sizeof(struct iphdr) +
+									sizeof(struct icmphdr),
+								buffer,
+								8 + sizeof(struct iphdr));
 				send_packet(m.interface, &m);
 			} else {
-				/* Look for destination address in the rtable */
-				int i;
-				if ((i = get_next_hop(rtable, htonl(ip_hdr->daddr))) < 0) {
-					/* Destination not present in the rtable */
-					fprintf(stderr, "Prefix not found!\n");
+				/* Try to forward packet */
+				while (	index > 0 &&
+								((struct route_cell*)rtable->tbl)[index].prefix ==
+									((struct route_cell*)rtable->tbl)[index-1].mask &&
+								((struct route_cell*)rtable->tbl)[index].mask <
+									((struct route_cell*)rtable->tbl)[index-1].mask)
+				{
+					/* Longest prefix match */
+					index--;
+				}
+				/* Put router's physical address in the eth header */
+				get_interface_mac(m.interface, eth_hdr->ether_shost);
+
+				int arp_index;
+				uint32_t next_hop = ((struct route_cell*)rtable->tbl)[index].next_hop;
+
+				if ((arp_index = find_entry(arp_table, next_hop, arp)) < 0) {
+					/* Entry not foudn in ARP table */
+					/* Enqueue packet to send when ARP Reply is received */
+					// queue_enq(q, m);
+					struct ether_arp* arp_hdr =
+						(struct ether_arp*)(m.payload + sizeof(struct ether_header));
+					/* Update source MAC and set destination to broadcast */
+					get_interface_mac(m.interface, eth_hdr->ether_shost);
+					get_interface_mac(m.interface, arp_hdr->arp_sha);
+
+					for (size_t i = 0; i < 6; i++) {
+						eth_hdr->ether_dhost[i] = 0xff;
+						arp_hdr->arp_tha[i] = 		0x00;
+					}
+					/* Update Ethernet protocol type */
+					eth_hdr->ether_type = 			ntohs(ETHERTYPE_ARP);
+					/* Create ARP header */
+					(arp_hdr->ea_hdr).ar_hrd = 	ntohs(ARPHRD_ETHER);
+					(arp_hdr->ea_hdr).ar_pro = 	ntohs(ETHERTYPE_IP);
+					(arp_hdr->ea_hdr).ar_hln = 	6;
+					(arp_hdr->ea_hdr).ar_pln = 	4;
+					(arp_hdr->ea_hdr).ar_op = 	ntohs(ARPOP_REQUEST);
+
+					*(uint32_t*)(arp_hdr->arp_spa) =	router;
+					*(uint32_t*)(arp_hdr->arp_tpa) =	target;
+					/* Update package length */
+					m.len = sizeof(struct ether_header) + sizeof(struct ether_arp);
+					/* Send packet */
+					send_packet(m.interface, &m);
 					continue;
 				}
-				printf("lalala\n");
-
-				printf("table[%d]\n", i);
-		    addr.s_addr = ((struct cell*)rtable->tbl)[i].prefix;
-		    printf("\tinteger prefix: %u\n", addr.s_addr);
-		    addr.s_addr = ntohl(addr.s_addr);
-		    printf("\tprefix: %s\n", inet_ntoa(addr));
-		    addr.s_addr = ((struct cell*)rtable->tbl)[i].next_hop;
-		    addr.s_addr = ntohl(addr.s_addr);
-		    printf("\tnext_hop: %s\n", inet_ntoa(addr));
-		    addr.s_addr = ((struct cell*)rtable->tbl)[i].mask;
-		    addr.s_addr = ntohl(addr.s_addr);
-		    printf("\tmask: %s\n", inet_ntoa(addr));
-		    printf("\tinterface: %ld\n", ((struct cell*)rtable->tbl)[i].interface);
+				/* Update source MAC to be the router's */
+				for (size_t i = 0; i < 6; i++) {
+					eth_hdr->ether_dhost[i] = ((struct arp_cell*)arp_table->tbl)[arp_index].mac[i];
+				}
+				send_packet(m.interface, &m);
 			}
+			free(buffer);
 		/* ARP */
 		} else if (protocol == ETHERTYPE_ARP) {
 			struct ether_arp* arp_hdr =
 				(struct ether_arp*)(m.payload + sizeof(struct ether_header));
 
 			uint8_t op = htons((arp_hdr->ea_hdr).ar_op);
+
+			fprintf (stdout, "\tIt's an ARP %d coming on interface %d ip %s!\n", op,
+							m.interface, get_interface_ip(m.interface));
+			addr.s_addr = *(uint32_t*)(arp_hdr->arp_tpa);
+			printf("\ttarget ip: %s\n", inet_ntoa(addr));
+
 			if (op == ARPOP_REQUEST) {
 				/* ARP Request */
-			 	fprintf (stdout, "\tIt's an ARP Request coming on interface %d ip %s!\n",
-								m.interface, get_interface_ip(m.interface));
-				addr.s_addr = *(uint32_t*)(arp_hdr->arp_tpa);
-				printf("\ttarget ip: %s\n", inet_ntoa(saddr));
-
 				uint32_t target = *(uint32_t*)(arp_hdr->arp_tpa);
 				struct in_addr* router_ip = malloc(sizeof(struct in_addr));
 				inet_aton(get_interface_ip(m.interface), router_ip);
@@ -132,7 +248,19 @@ int main(int argc, char *argv[])
 				}
 			} else if (op == ARPOP_REPLY) {
 				/* ARP Reply */
-				printf("\tIt's an ARP reply!\n");
+				uint32_t source = htonl(*(uint32_t*)arp_hdr->arp_spa);
+				int index;
+
+				if ((index = find_entry(arp_table, source, arp)) < 0) {
+					struct arp_cell new_entry;
+					/* Copy IP and mac of sender in the ARP table */
+					new_entry.ip = source;
+					for (size_t i = 0; i < 6; i++) {
+						new_entry.mac[i] = arp_hdr->arp_sha[i];
+					}
+
+					add_entry(arp_table, &new_entry, arp);
+				}
 			}
 		}
 	}
