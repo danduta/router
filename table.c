@@ -52,7 +52,7 @@ int read_route_table(struct table* table, const char* in) {
 
     char* tok = strtok(buffer, " ");
     int field = 0;
-
+    printf("%d, %s\n", table->curr, buffer);
     while (tok) {
       if (field < 3) {
         inet_aton(tok, addr);
