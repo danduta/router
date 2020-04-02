@@ -59,19 +59,6 @@ int main(int argc, char *argv[])
 			uint8_t reply_type = 0xff;
 			int index;
 
-		size_t buffer_size = 	m.len -
-									sizeof(struct ether_header) -
-									sizeof(struct iphdr) -
-									sizeof(struct icmphdr);
-			char* buffer = malloc(buffer_size + 1);
-
-			// memcpy (buffer,
-			// 				m.payload +
-			// 					sizeof(struct ether_header) +
-			// 					sizeof(struct iphdr) +
-			// 					sizeof(struct icmphdr),
-			// 				buffer_size);
-
 			if (	target == router &&
 						ip_hdr->protocol == 1 &&
 						icmp_hdr->type == ICMP_ECHO) {
@@ -88,60 +75,6 @@ int main(int argc, char *argv[])
 				printf("\tNot found in rtable! %u\n", ICMP_DEST_UNREACH);
 			} else {
 				/* It's a valid packet */
-				printf("\tNext hop is: ");
-				print_route_entry(stdout, rtable, index);
-			}
-
-			if (reply_type == ICMP_ECHOREPLY) {
-				/* Update ICMP type to ECHOREPLY */
-				icmp_hdr->type = htons(ICMP_ECHOREPLY);
-				/* Switch destination and source IP in IP header */
-				uint32_t aux = ip_hdr->saddr;
-				ip_hdr->saddr = ip_hdr->daddr;
-				ip_hdr->daddr = aux;
-				/* Update source and destination MAC in the Ethernet header */
-				for (size_t i = 0; i < 6; i++) {
-					eth_hdr->ether_dhost[i] = eth_hdr->ether_shost[i];
-				}
-				get_interface_mac(m.interface, eth_hdr->ether_shost);
-
-				icmp_hdr->checksum = 0;
-				icmp_hdr->checksum = checksum(icmp_hdr, m.len - sizeof(struct ether_header) - sizeof(struct iphdr));
-
-				send_packet(m.interface, &m);
-			} else if (reply_type != 0xff) {
-				/* Sending back ICMP message */
-				printf("\tSending back ICMP message with type: %u\n", reply_type);
-				/* Update ICMP type to ECHOREPLY */
-				icmp_hdr->type = reply_type;
-				icmp_hdr->code = 0;
-				/* Change protocol to ICMP */
-				ip_hdr->protocol = 1;
-				/* Switch destination and source IP in IP header */
-				uint32_t aux = ip_hdr->saddr;
-				ip_hdr->saddr = ip_hdr->daddr;
-				ip_hdr->daddr = aux;
-				/* Update source and destination MAC in the Ethernet header */
-				for (size_t i = 0; i < 6; i++) {
-					eth_hdr->ether_dhost[i] = eth_hdr->ether_shost[i];
-				}
-				get_interface_mac(m.interface, eth_hdr->ether_shost);
-				/* Update IP and packet length */
-				ip_hdr->tot_len = htons(2 * sizeof(struct iphdr) +
-																sizeof(struct icmphdr) + 8);
-
-				m.len = sizeof(struct ether_header) +
-								2 * sizeof(struct iphdr) +
-								sizeof(struct icmphdr) + 8;
-				/* Update checksums */
-				ip_hdr->check = 0;
-				ip_hdr->check = checksum(ip_hdr, sizeof(struct iphdr));
-				icmp_hdr->checksum = 0;
-				// icmp_hdr->checksum = checksum(icmp_hdr, m.len - sizeof(struct ether_header) - sizeof(struct iphdr));
-				icmp_hdr->checksum = checksum(icmp_hdr, sizeof(struct icmphdr) + sizeof(struct iphdr) + 8);
-				/* Send packet */
-				send_packet(m.interface, &m);
-			} else {
 				/* Try to forward packet */
 				while (	index > 0 &&
 								((struct route_cell*)rtable->tbl)[index].prefix ==
@@ -199,7 +132,57 @@ int main(int argc, char *argv[])
 				}
 				send_packet(m.interface, &m);
 			}
-			free(buffer);
+
+			if (reply_type == ICMP_ECHOREPLY) {
+				/* Update ICMP type to ECHOREPLY */
+				icmp_hdr->type = htons(ICMP_ECHOREPLY);
+				/* Switch destination and source IP in IP header */
+				uint32_t aux = ip_hdr->saddr;
+				ip_hdr->saddr = ip_hdr->daddr;
+				ip_hdr->daddr = aux;
+				/* Update source and destination MAC in the Ethernet header */
+				for (size_t i = 0; i < 6; i++) {
+					eth_hdr->ether_dhost[i] = eth_hdr->ether_shost[i];
+				}
+				get_interface_mac(m.interface, eth_hdr->ether_shost);
+
+				icmp_hdr->checksum = 0;
+				icmp_hdr->checksum =
+					checksum(icmp_hdr, m.len - sizeof(struct ether_header) - sizeof(struct iphdr));
+
+				send_packet(m.interface, &m);
+			} else if (reply_type != 0xff) {
+				/* Sending back ICMP message */
+				printf("\tSending back ICMP message with type: %u\n", reply_type);
+				/* Update ICMP type to ECHOREPLY */
+				icmp_hdr->type = reply_type;
+				icmp_hdr->code = 0;
+				/* Change protocol to ICMP */
+				ip_hdr->protocol = 1;
+				/* Switch destination and source IP in IP header */
+				uint32_t aux = ip_hdr->saddr;
+				ip_hdr->saddr = ip_hdr->daddr;
+				ip_hdr->daddr = aux;
+				/* Update source and destination MAC in the Ethernet header */
+				for (size_t i = 0; i < 6; i++) {
+					eth_hdr->ether_dhost[i] = eth_hdr->ether_shost[i];
+				}
+				get_interface_mac(m.interface, eth_hdr->ether_shost);
+				/* Update IP and packet length */
+				ip_hdr->tot_len = htons(2 * sizeof(struct iphdr) +
+																sizeof(struct icmphdr) + 8);
+
+				m.len = sizeof(struct ether_header) +
+								2 * sizeof(struct iphdr) +
+								sizeof(struct icmphdr) + 8;
+				/* Update checksums */
+				ip_hdr->check = 0;
+				ip_hdr->check = checksum(ip_hdr, sizeof(struct iphdr));
+				icmp_hdr->checksum = 0;
+				icmp_hdr->checksum = checksum(icmp_hdr, sizeof(struct icmphdr) + sizeof(struct iphdr) + 8);
+				/* Send packet */
+				send_packet(m.interface, &m);
+			}
 		/* ARP */
 		} else if (protocol == ETHERTYPE_ARP) {
 			struct ether_arp* arp_hdr =
