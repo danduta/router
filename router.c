@@ -57,22 +57,20 @@ int main(int argc, char *argv[])
 			uint32_t router = router_ip->s_addr;
 
 			uint8_t reply_type = 0xff;
-			// printf("target: %s router: ", inet_ntoa(addr));
-			// printf("%s\n", inet_ntoa(*router_ip));
 			int index;
 
-			size_t buffer_size = 	m.len -
-														sizeof(struct ether_header) -
-														sizeof(struct iphdr) -
-														sizeof(struct icmphdr);
+		size_t buffer_size = 	m.len -
+									sizeof(struct ether_header) -
+									sizeof(struct iphdr) -
+									sizeof(struct icmphdr);
 			char* buffer = malloc(buffer_size + 1);
 
-			memcpy (buffer,
-							m.payload +
-								sizeof(struct ether_header) +
-								sizeof(struct iphdr) +
-								sizeof(struct icmphdr),
-							buffer_size);
+			// memcpy (buffer,
+			// 				m.payload +
+			// 					sizeof(struct ether_header) +
+			// 					sizeof(struct iphdr) +
+			// 					sizeof(struct icmphdr),
+			// 				buffer_size);
 
 			if (	target == router &&
 						ip_hdr->protocol == 1 &&
@@ -91,7 +89,7 @@ int main(int argc, char *argv[])
 			} else {
 				/* It's a valid packet */
 				printf("\tNext hop is: ");
-				print_route_entry(rtable, index);
+				print_route_entry(stdout, rtable, index);
 			}
 
 			if (reply_type == ICMP_ECHOREPLY) {
@@ -116,7 +114,7 @@ int main(int argc, char *argv[])
 				printf("\tSending back ICMP message with type: %u\n", reply_type);
 				/* Update ICMP type to ECHOREPLY */
 				icmp_hdr->type = reply_type;
-				icmp_hdr->code = (reply_type == ICMP_DEST_UNREACH);
+				icmp_hdr->code = 0;
 				/* Change protocol to ICMP */
 				ip_hdr->protocol = 1;
 				/* Switch destination and source IP in IP header */
@@ -142,28 +140,21 @@ int main(int argc, char *argv[])
 				// icmp_hdr->checksum = checksum(icmp_hdr, m.len - sizeof(struct ether_header) - sizeof(struct iphdr));
 				icmp_hdr->checksum = checksum(icmp_hdr, sizeof(struct icmphdr) + sizeof(struct iphdr) + 8);
 				/* Send packet */
-				memcpy (buffer,
-								m.payload + sizeof(struct ether_header),
-								8 + sizeof(struct iphdr));
-
-				memcpy (m.payload +
-									sizeof(struct ether_header) +
-									sizeof(struct iphdr) +
-									sizeof(struct icmphdr),
-								buffer,
-								8 + sizeof(struct iphdr));
 				send_packet(m.interface, &m);
 			} else {
 				/* Try to forward packet */
 				while (	index > 0 &&
 								((struct route_cell*)rtable->tbl)[index].prefix ==
-									((struct route_cell*)rtable->tbl)[index-1].mask &&
+									((struct route_cell*)rtable->tbl)[index-1].prefix &&
 								((struct route_cell*)rtable->tbl)[index].mask <
 									((struct route_cell*)rtable->tbl)[index-1].mask)
 				{
 					/* Longest prefix match */
+					printf("STILL LOOKING...\n");
 					index--;
 				}
+				printf("\tFINAL ENTRY:\n");
+				print_route_entry(stdout, rtable, index);
 				/* Put router's physical address in the eth header */
 				get_interface_mac(m.interface, eth_hdr->ether_shost);
 
@@ -195,8 +186,9 @@ int main(int argc, char *argv[])
 
 					*(uint32_t*)(arp_hdr->arp_spa) =	router;
 					*(uint32_t*)(arp_hdr->arp_tpa) =	target;
-					/* Update package length */
+					/* Update package length and interface */
 					m.len = sizeof(struct ether_header) + sizeof(struct ether_arp);
+					m.interface = ((struct route_cell*)rtable->tbl)[index].interface;
 					/* Send packet */
 					send_packet(m.interface, &m);
 					continue;

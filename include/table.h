@@ -50,7 +50,7 @@ void sort_table(struct table* table, size_t cell_type);
 int get_next_hop(struct table* table, uint32_t destination);
 int find_entry(struct table* table, uint32_t destination, size_t cell_type);
 void print_route_table(struct table* table);
-void print_route_entry(struct table* table, size_t index);
+void print_route_entry(FILE* stream, struct table* table, size_t index);
 uint16_t checksum(void *vdata, size_t length);
 
 #endif

@@ -52,7 +52,7 @@ int read_route_table(struct table* table, const char* in) {
 
     char* tok = strtok(buffer, " ");
     int field = 0;
-    printf("%d, %s\n", table->curr, buffer);
+
     while (tok) {
       if (field < 3) {
         inet_aton(tok, addr);
@@ -95,9 +95,9 @@ int add_entry(struct table* table, void* cell, size_t cell_type) {
   }
 
   if (cell_type == route) {
-    ((struct route_cell*)table->tbl)[++(table->curr)] = *(struct route_cell*)cell;
+    ((struct route_cell*)table->tbl)[(table->curr)++] = *(struct route_cell*)cell;
   } else if (cell_type == arp) {
-    ((struct arp_cell*)table->tbl)[++(table->curr)] = *(struct arp_cell*)cell;
+    ((struct arp_cell*)table->tbl)[(table->curr)++] = *(struct arp_cell*)cell;
   }
 
   if (cell_type == arp) {
@@ -109,7 +109,7 @@ int add_entry(struct table* table, void* cell, size_t cell_type) {
 
 int compare_route_entries(const void* e1, const void* e2) {
   return (((struct route_cell*)e1)->prefix == ((struct route_cell*)e2)->prefix?
-            ((struct route_cell*)e1)->mask - ((struct route_cell*)e2)->mask :
+            ((struct route_cell*)e2)->mask - ((struct route_cell*)e1)->mask :
             (uint32_t)((struct route_cell*)e1)->prefix - (uint32_t)((struct route_cell*)e2)->prefix);
 }
 
@@ -156,29 +156,13 @@ int get_next_hop(struct table* table, uint32_t destination) {
 }
 
 int find_entry(struct table* table, uint32_t destination, size_t cell_type) {
-  // int low = 0, hi = table->curr;
-  //
-  // while (low <= hi) {
-  //   size_t mid = low + ((hi - low) / 2);
-  //   uint32_t match;
-  //
-  //   if (cell_type == route) {
-  //     match = ((struct route_cell*)table->tbl)[mid].prefix;
-  //   } else if (cell_type == arp) {
-  //     match = ((struct arp_cell*)table->tbl)[mid].ip;
-  //   }
-  //
-  //   if (destination == match) {
-  //     return mid;
-  //   } else if (destination < match) {
-  //     hi = mid - 1;
-  //   } else {
-  //     low = mid + 1;
-  //   }
-  // }
   for (size_t i = 0; i < table->curr; i++) {
+    uint32_t possible_prefix =
+      destination & ((struct route_cell*)table->tbl)[i].mask;
+    uint32_t prefix = ((struct route_cell*)table->tbl)[i].prefix;
+
     if (cell_type == route) {
-      if (((struct route_cell*)table->tbl)[i].prefix == destination) {
+      if (prefix == possible_prefix) {
         return i;
       }
     } else if (cell_type == arp) {
@@ -192,26 +176,29 @@ int find_entry(struct table* table, uint32_t destination, size_t cell_type) {
 }
 
 void print_route_table(struct table* table) {
-  printf("Routing table:\n");
+  FILE* out = fopen("rtable_out.txt", "w");
+
+  fprintf(out, "Routing table:\n");
   for (size_t i = 0; i < table->curr; i++) {
-    print_route_entry(table, i);
+    print_route_entry(out, table, i);
   }
+
+  fclose(out);
 }
 
-void print_route_entry(struct table* table, size_t i) {
+void print_route_entry(FILE* out, struct table* table, size_t i) {
   struct in_addr addr;
-  printf("table[%ld]\n", i);
+  fprintf(out, "table[%ld]\n", i);
   addr.s_addr = ((struct route_cell*)table->tbl)[i].prefix;
-  printf("\tinteger prefix: %u\n", addr.s_addr);
   addr.s_addr = ntohl(addr.s_addr);
-  printf("\tprefix: %s\n", inet_ntoa(addr));
+  fprintf(out, "\tPrefix: %s, ", inet_ntoa(addr));
   addr.s_addr = ((struct route_cell*)table->tbl)[i].next_hop;
   addr.s_addr = ntohl(addr.s_addr);
-  printf("\tnext_hop: %s\n", inet_ntoa(addr));
+  fprintf(out, "Next_hop: %s, ", inet_ntoa(addr));
   addr.s_addr = ((struct route_cell*)table->tbl)[i].mask;
   addr.s_addr = ntohl(addr.s_addr);
-  printf("\tmask: %s\n", inet_ntoa(addr));
-  printf("\tinterface: %ld\n", ((struct route_cell*)table->tbl)[i].interface);
+  fprintf(out, "Mask: %s, ", inet_ntoa(addr));
+  fprintf(out, "Interface: %ld\n", ((struct route_cell*)table->tbl)[i].interface);
 }
 
 uint16_t checksum(void *vdata, size_t length) {
