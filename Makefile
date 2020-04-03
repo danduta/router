@@ -1,5 +1,6 @@
 PROJECT=router
-SOURCES=router.c queue.c list.c skel.c table.c
+SOURCES=list.c skel.c table.c
+SOURCES-CPP=router.cpp
 LIBRARY=nope
 INCPATHS=include
 
@@ -7,21 +8,26 @@ LIBPATHS=.
 LDFLAGS=
 CFLAGS=-c -Wall
 CC=gcc
+CXX=g++
 # Automatic generation of some important lists
 OBJECTS=$(SOURCES:.c=.o)
+OBJECTS-CPP=$(SOURCES-CPP:.cpp=.o)
 INCFLAGS=$(foreach TMP,$(INCPATHS),-I$(TMP))
 LIBFLAGS=$(foreach TMP,$(LIBPATHS),-L$(TMP))
 
 # Set up the output file names for the different output types
 BINARY=$(PROJECT)
 
-all: $(SOURCES) $(BINARY)
+all: $(SOURCES) $(SOURCES-CPP) $(BINARY)
 
-$(BINARY): $(OBJECTS)
-	$(CC) $(LIBFLAGS) $(OBJECTS) $(LDFLAGS) -o $@
+$(BINARY): $(OBJECTS) $(OBJECTS-CPP)
+	$(CXX) $(LIBFLAGS) $(OBJECTS-CPP) $(OBJECTS) $(LDFLAGS) -o $@
 
 .c.o:
-	$(CC) $(INCFLAGS) $(CFLAGS) -fPIC $< -o $@
+	$(CXX) $(INCFLAGS) $(CFLAGS) -fPIC $< -o $@
+
+.cpp.o:
+	$(CXX) $(INCFLAGS) $(CFLAGS) -fPIC $< -o $@
 
 distclean: clean
 	rm -f $(BINARY)
