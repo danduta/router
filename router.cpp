@@ -13,7 +13,7 @@ using namespace std;
  * error type that should be sent back to the host.
  */
 typedef struct validity_pair {
-	size_t index;
+	int index;
 	uint8_t reply_type;
 } vld;
 
@@ -47,7 +47,7 @@ vld check_pkt(	packet m,
 		pkt_validity.reply_type = ICMP_TIME_EXCEEDED;
 		fprintf(stdout, "\tTTL exceeded!n");
 	} else if (pkt_validity.index < 0) {
-		/* Look for next hop */
+		/* Host unreachable */
 		pkt_validity.reply_type = ICMP_DEST_UNREACH;
 		fprintf(stdout, "\tNot found in rtable!\n");
 	} else if (ip_checksum != old_ip_checksum) {
@@ -125,13 +125,13 @@ int main(int argc, char *argv[])
 			inet_aton(get_interface_ip(m.interface), router_ip);
 			uint32_t router = router_ip->s_addr;
 
-			uint8_t reply_type = 0xff;
-			int index;
+			// uint8_t reply_type = 0xff;
+			// int index;
 
-			uint16_t ip_checksum;
-			uint16_t old_ip_checksum = ip_hdr->check;
-			ip_hdr->check = 0;
-			ip_checksum = checksum(ip_hdr, sizeof(struct iphdr));
+			// uint16_t ip_checksum;
+			// uint16_t old_ip_checksum = ip_hdr->check;
+			// ip_hdr->check = 0;
+			// ip_checksum = checksum(ip_hdr, sizeof(struct iphdr));
 
 			fprintf(stdout,
 					"\tIt's an IP packet coming on interface %d ip %s!\n",
@@ -139,47 +139,44 @@ int main(int argc, char *argv[])
 			addr.s_addr = ip_hdr->daddr;
 			fprintf(stdout, "\ttarget ip: %s\n", inet_ntoa(addr));
 
-			if (	target == router &&
-					ip_hdr->protocol == 1 &&
-					icmp_hdr->type == ICMP_ECHO) {
-				/* ICMP Echo request to the router*/
-				reply_type = ICMP_ECHOREPLY;
-				printf("\tIt's an ICMP Echo request to the router! %u\n", ICMP_ECHOREPLY);
-			} else if (ip_hdr->ttl <= 1) {
-				/* Compare TTL */
-				reply_type = ICMP_TIME_EXCEEDED;
-				printf("\tTTL exceeded! %u\n", ICMP_TIME_EXCEEDED);
-			} else if ((index = get_next_hop(rtable, htonl(ip_hdr->daddr))) < 0) {
-				/* Look for next hop */
-				reply_type = ICMP_DEST_UNREACH;
-				printf("\tNot found in rtable! %u\n", ICMP_DEST_UNREACH);
-			} else if (ip_checksum != old_ip_checksum) {
+			// if (	target == router &&
+			// 		ip_hdr->protocol == 1 &&
+			// 		icmp_hdr->type == ICMP_ECHO) {
+			// 	/* ICMP Echo request to the router*/
+			// 	reply_type = ICMP_ECHOREPLY;
+			// 	printf("\tIt's an ICMP Echo request to the router! %u\n", ICMP_ECHOREPLY);
+			// } else if (ip_hdr->ttl <= 1) {
+			// 	/* Compare TTL */
+			// 	reply_type = ICMP_TIME_EXCEEDED;
+			// 	printf("\tTTL exceeded! %u\n", ICMP_TIME_EXCEEDED);
+			// } else if ((index = get_next_hop(rtable, htonl(ip_hdr->daddr))) < 0) {
+			// 	/* Look for next hop */
+			// 	reply_type = ICMP_DEST_UNREACH;
+			// 	printf("\tNot found in rtable! %u\n", ICMP_DEST_UNREACH);
+			// } else if (ip_checksum != old_ip_checksum) {
+			// 	continue;
+			vld pkt_validity = check_pkt(m, rtable, target, router);
+			printf("--validity: %u, %u", pkt_validity.index, pkt_validity.reply_type);
+
+			if (pkt_validity.reply_type == IP_WRNG_CHECK) {
 				continue;
-			} else {
+			} else if (pkt_validity.reply_type == IP_VALID_PKT) {
 				/* It's a valid packet */
 				/* Try to forward packet */
-				while (	index > 0 &&
-						((struct route_cell*)rtable->tbl)[index].prefix ==
-							((struct route_cell*)rtable->tbl)[index-1].prefix &&
-						((struct route_cell*)rtable->tbl)[index].mask <
-							((struct route_cell*)rtable->tbl)[index-1].mask)
-				{
-					/* Longest prefix match */
-					printf("STILL LOOKING...\n");
-					index--;
-				}
 				printf("\tFINAL ENTRY:\n");
-				print_route_entry(stdout, rtable, index);
+				print_route_entry(stdout, rtable, pkt_validity.index);
 				/* Put router's physical address in the eth header */
-				m.interface = ((struct route_cell*)rtable->tbl)[index].interface;
 				get_interface_mac(m.interface, eth_hdr->ether_shost);
+				/* Update packet interface to know where to send it later */
+				m.interface = get_entry_interface(rtable, pkt_validity.index);
 				/* Put the packet in the queue */
 				q.push(m);
 
 				int arp_index;
-				uint32_t next_hop = ((struct route_cell*)rtable->tbl)[index].next_hop;
+				uint32_t next_hop = get_entry_next_hop(rtable, pkt_validity.index);
 
 				if ((arp_index = find_entry(arp_table, next_hop, arp)) < 0) {
+					printf("Not found in ARP table\n");
 					/* Entry not foudn in ARP table */
 					/* Enqueue packet to send when ARP Reply is received */
 					struct ether_arp* arp_hdr =
@@ -215,9 +212,7 @@ int main(int argc, char *argv[])
 				}
 				update_packet(m);
 				// send_packet(m.interface, &m);
-			}
-
-			if (reply_type == ICMP_ECHOREPLY) {
+			} else if (pkt_validity.reply_type == ICMP_ECHOREPLY) {
 				/* Update ICMP type to ECHOREPLY */
 				icmp_hdr->type = htons(ICMP_ECHOREPLY);
 				/* Switch destination and source IP in IP header */
@@ -233,11 +228,11 @@ int main(int argc, char *argv[])
 				icmp_hdr->checksum = 0;
 				icmp_hdr->checksum =
 					checksum(icmp_hdr, m.len - sizeof(struct ether_header) - sizeof(struct iphdr));
-			} else if (reply_type != 0xff) {
+			} else if (pkt_validity.reply_type != IP_VALID_PKT) {
 				/* Sending back ICMP message */
-				printf("\tSending back ICMP message with type: %u\n", reply_type);
+				printf("\tSending back ICMP message with type: %u\n", pkt_validity.reply_type);
 				/* Update ICMP type to ECHOREPLY */
-				icmp_hdr->type = reply_type;
+				icmp_hdr->type = pkt_validity.reply_type;
 				icmp_hdr->code = 0;
 				/* Change protocol to ICMP */
 				ip_hdr->protocol = 1;

@@ -45,10 +45,15 @@ enum cell_types {
 struct table* create_table(size_t cell_size);
 int add_entry(struct table* table, void* cell, size_t cell_type);
 
+uint32_t get_entry_prefix(struct table* table, size_t index);
+uint32_t get_entry_next_hop(struct table* table, size_t index);
+uint32_t get_entry_mask(struct table* table, size_t index);
+size_t get_entry_interface(struct table* table, size_t index);
+
 int read_route_table(struct table* table, const char* in);
 void sort_table(struct table* table, size_t cell_type);
 int get_next_hop(struct table* table, uint32_t destination);
-int find_entry(struct table* table, uint32_t destination, size_t cell_type);
+size_t find_entry(struct table* table, uint32_t destination, size_t cell_type);
 void print_route_table(struct table* table);
 void print_route_entry(FILE* stream, struct table* table, size_t index);
 uint16_t checksum(void *vdata, size_t length);

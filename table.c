@@ -152,6 +152,15 @@ int get_next_hop(struct table* table, uint32_t destination)
     uint32_t prefix = ((struct route_cell*)table->tbl)[mid].prefix;
 
     if (prefix == possible_prefix) {
+      /* Longest prefix match */
+      while (	mid > 0 &&
+            ((struct route_cell*)table->tbl)[mid].prefix ==
+              ((struct route_cell*)table->tbl)[mid-1].prefix &&
+            ((struct route_cell*)table->tbl)[mid].mask <
+              ((struct route_cell*)table->tbl)[mid-1].mask)
+      {
+        mid--;
+      }
       return mid;
     } else if (possible_prefix < prefix) {
       hi = mid - 1;
@@ -163,7 +172,7 @@ int get_next_hop(struct table* table, uint32_t destination)
   return -1;
 }
 
-int find_entry(struct table* table, uint32_t destination, size_t cell_type)
+size_t find_entry(struct table* table, uint32_t destination, size_t cell_type)
 {
   for (size_t i = 0; i < table->curr; i++) {
     uint32_t possible_prefix =
@@ -263,4 +272,18 @@ uint16_t checksum(void *vdata, size_t length)
 
 	// Return the checksum in network byte order.
 	return htons(~acc);
+}
+
+uint32_t get_entry_prefix(struct table* table, size_t index) {
+  return ((struct route_cell*)table->tbl)[index].prefix;
+}
+uint32_t get_entry_next_hop(struct table* table, size_t index) {
+  return ((struct route_cell*)table->tbl)[index].next_hop;
+}
+uint32_t get_entry_mask(struct table* table, size_t index) {
+  return ((struct route_cell*)table->tbl)[index].mask;
+}
+
+size_t get_entry_interface(struct table* table, size_t index) {
+  return ((struct route_cell*)table->tbl)[index].interface;
 }
