@@ -90,7 +90,10 @@ int main(int argc, char *argv[])
 				printf("\tFINAL ENTRY:\n");
 				print_route_entry(stdout, rtable, index);
 				/* Put router's physical address in the eth header */
+				m.interface = ((struct route_cell*)rtable->tbl)[index].interface;
 				get_interface_mac(m.interface, eth_hdr->ether_shost);
+				/* Put the packet in the queue */
+				q.push(m);
 
 				int arp_index;
 				uint32_t next_hop = ((struct route_cell*)rtable->tbl)[index].next_hop;
@@ -98,7 +101,6 @@ int main(int argc, char *argv[])
 				if ((arp_index = find_entry(arp_table, next_hop, arp)) < 0) {
 					/* Entry not foudn in ARP table */
 					/* Enqueue packet to send when ARP Reply is received */
-					// queue_enq(q, m);
 					struct ether_arp* arp_hdr =
 						(struct ether_arp*)(m.payload + sizeof(struct ether_header));
 					/* Update source MAC and set destination to broadcast */
@@ -120,18 +122,16 @@ int main(int argc, char *argv[])
 
 					*(uint32_t*)(arp_hdr->arp_spa) =	router;
 					*(uint32_t*)(arp_hdr->arp_tpa) =	target;
-					/* Update package length and interface */
+					/* Update package length */
 					m.len = sizeof(struct ether_header) + sizeof(struct ether_arp);
-					m.interface = ((struct route_cell*)rtable->tbl)[index].interface;
 					/* Send packet */
 					send_packet(m.interface, &m);
 					continue;
 				}
-				/* Update source MAC to be the router's */
+				/* Update destination MAC */
 				for (size_t i = 0; i < 6; i++) {
 					eth_hdr->ether_dhost[i] = ((struct arp_cell*)arp_table->tbl)[arp_index].mac[i];
 				}
-				send_packet(m.interface, &m);
 			}
 
 			if (reply_type == ICMP_ECHOREPLY) {
@@ -150,8 +150,6 @@ int main(int argc, char *argv[])
 				icmp_hdr->checksum = 0;
 				icmp_hdr->checksum =
 					checksum(icmp_hdr, m.len - sizeof(struct ether_header) - sizeof(struct iphdr));
-
-				send_packet(m.interface, &m);
 			} else if (reply_type != 0xff) {
 				/* Sending back ICMP message */
 				printf("\tSending back ICMP message with type: %u\n", reply_type);
@@ -182,8 +180,9 @@ int main(int argc, char *argv[])
 				icmp_hdr->checksum = 0;
 				icmp_hdr->checksum = checksum(icmp_hdr, sizeof(struct icmphdr) + sizeof(struct iphdr) + 8);
 				/* Send packet */
-				send_packet(m.interface, &m);
 			}
+
+			send_packet(m.interface, &m);
 		/* ARP */
 		} else if (protocol == ETHERTYPE_ARP) {
 			struct ether_arp* arp_hdr =
@@ -236,6 +235,29 @@ int main(int argc, char *argv[])
 					}
 
 					add_entry(arp_table, &new_entry, arp);
+					
+					packet front = q.front();
+					struct iphdr* ip_hdr =
+						(struct iphdr*)(front.payload + sizeof(struct ether_header));
+					uint32_t front_target = htonl(ip_hdr->daddr);
+					uint32_t target = source;
+					while(front_target == target) {
+						q.pop();
+
+						m.interface = front.interface;
+						m.len = front.len;
+						memcpy(m.payload, front.payload, m.len);
+
+						for (size_t i = 0; i < 6; i++) {
+							eth_hdr->ether_dhost[i] = new_entry.mac[i];
+						}
+
+						send_packet(m.interface, &m);
+
+						front = q.front();
+						ip_hdr = (struct iphdr*)(front.payload + sizeof(struct ether_header));
+						front_target = htonl(ip_hdr->daddr);
+					}
 				}
 			}
 		}
