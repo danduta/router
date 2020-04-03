@@ -5,17 +5,56 @@
 using namespace std;
 
 #define IP_WRNG_CHECK 0xef
-#define IP_VALID_PKT 0xdf
+#define IP_VALID_PKT 0xff
 
-uint8_t check_packet(packet m) {
+/*
+ * struct used for the return value of check_packet().
+ * It contains the index of the next_hop or the ICMP
+ * error type that should be sent back to the host.
+ */
+typedef struct validity_pair {
+	size_t index;
+	uint8_t reply_type;
+} vld;
+
+vld check_pkt(	packet m,
+				struct table* rtable,
+				uint32_t target,
+				uint32_t router)
+{
 	struct iphdr* ip_hdr =
 		(struct iphdr*)(m.payload + sizeof(struct ether_header));
 	struct icmphdr* icmp_hdr = (struct icmphdr*)(m.payload 	+
 		sizeof(struct ether_header) + sizeof(struct iphdr));
 
-	
+	vld pkt_validity;
+	pkt_validity.index = get_next_hop(rtable, htonl(ip_hdr->daddr));
+	pkt_validity.reply_type = IP_VALID_PKT;
 
-	return 0;
+	uint16_t ip_checksum;
+	uint16_t old_ip_checksum = ip_hdr->check;
+	ip_hdr->check = 0;
+	ip_checksum = checksum(ip_hdr, sizeof(struct iphdr));
+
+	if (target == router &&
+		ip_hdr->protocol == 1 &&
+		icmp_hdr->type == ICMP_ECHO) {
+		/* ICMP Echo request to the router*/
+		pkt_validity.reply_type = ICMP_ECHOREPLY;
+		fprintf(stdout, "\tIt's an ICMP Echo request to the router!\n");
+	} else if (ip_hdr->ttl <= 1) {
+		/* Compare TTL */
+		pkt_validity.reply_type = ICMP_TIME_EXCEEDED;
+		fprintf(stdout, "\tTTL exceeded!n");
+	} else if (pkt_validity.index < 0) {
+		/* Look for next hop */
+		pkt_validity.reply_type = ICMP_DEST_UNREACH;
+		fprintf(stdout, "\tNot found in rtable!\n");
+	} else if (ip_checksum != old_ip_checksum) {
+		pkt_validity.reply_type = IP_WRNG_CHECK;
+	}
+
+	return pkt_validity;
 }
 
 void update_packet(packet& m) {
@@ -79,17 +118,12 @@ int main(int argc, char *argv[])
 			struct icmphdr* icmp_hdr = (struct icmphdr*)(m.payload 	+
 				sizeof(struct ether_header) + sizeof(struct iphdr));
 
-			fprintf(stdout,
-					"\tIt's an IP packet coming on interface %d ip %s!\n",
-					m.interface, get_interface_ip(m.interface));
-			addr.s_addr = ip_hdr->daddr;
-			fprintf(stdout, "\ttarget ip: %s\n", inet_ntoa(addr));
-
 			uint32_t target = ip_hdr->daddr;
+
 			struct in_addr* router_ip;
 			router_ip = (struct in_addr*)malloc(sizeof(struct in_addr));
-			inet_aton(get_interface_ip(m.interface), addr);
-			uint32_t router = router_ip>s_addr;
+			inet_aton(get_interface_ip(m.interface), router_ip);
+			uint32_t router = router_ip->s_addr;
 
 			uint8_t reply_type = 0xff;
 			int index;
@@ -99,9 +133,15 @@ int main(int argc, char *argv[])
 			ip_hdr->check = 0;
 			ip_checksum = checksum(ip_hdr, sizeof(struct iphdr));
 
+			fprintf(stdout,
+					"\tIt's an IP packet coming on interface %d ip %s!\n",
+					m.interface, get_interface_ip(m.interface));
+			addr.s_addr = ip_hdr->daddr;
+			fprintf(stdout, "\ttarget ip: %s\n", inet_ntoa(addr));
+
 			if (	target == router &&
-						ip_hdr->protocol == 1 &&
-						icmp_hdr->type == ICMP_ECHO) {
+					ip_hdr->protocol == 1 &&
+					icmp_hdr->type == ICMP_ECHO) {
 				/* ICMP Echo request to the router*/
 				reply_type = ICMP_ECHOREPLY;
 				printf("\tIt's an ICMP Echo request to the router! %u\n", ICMP_ECHOREPLY);

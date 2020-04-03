@@ -1,6 +1,7 @@
 #include "table.h"
 
-struct table* create_table(size_t cell_type) {
+struct table* create_table(size_t cell_type)
+{
   struct table* table;
 
   table = (struct table*)malloc(sizeof(struct table));
@@ -21,18 +22,23 @@ struct table* create_table(size_t cell_type) {
   return table;
 }
 
-void parse_entry(uint32_t* addr, struct route_cell* entry) {
+void parse_entry(uint32_t* addr, struct route_cell* entry)
+{
   entry->prefix = htonl(addr[0]);
   entry->next_hop = htonl(addr[1]);
   entry->mask = htonl(addr[2]);
   entry->interface = addr[3];
 }
 
-int read_route_table(struct table* table, const char* in) {
+int read_route_table(struct table* table, const char* in)
+{
   fprintf(stdout, "Reading table...\n");
 
-  struct route_cell* entry = (struct route_cell*)malloc(sizeof(struct route_cell));
-  struct in_addr* addr = (struct in_addr*)malloc(sizeof(struct in_addr));
+  struct route_cell* entry;
+  entry = (struct route_cell*)malloc(sizeof(struct route_cell));
+  struct in_addr* addr;
+  addr = (struct in_addr*)malloc(sizeof(struct in_addr));
+
   uint32_t entry_fields[4];
 
   if (!addr || !entry || !table || !table->tbl) {
@@ -78,7 +84,8 @@ int read_route_table(struct table* table, const char* in) {
   return READ_SUCCES;
 }
 
-int add_entry(struct table* table, void* cell, size_t cell_type) {
+int add_entry(struct table* table, void* cell, size_t cell_type)
+{
   if (!table || !table->tbl) {
     return ADD_FAIL;
   }
@@ -95,30 +102,30 @@ int add_entry(struct table* table, void* cell, size_t cell_type) {
   }
 
   if (cell_type == route) {
-    ((struct route_cell*)table->tbl)[(table->curr)++] = *(struct route_cell*)cell;
+    struct route_cell entry = *(struct route_cell*)cell;
+    ((struct route_cell*)table->tbl)[(table->curr)++] = entry;
   } else if (cell_type == arp) {
-    ((struct arp_cell*)table->tbl)[(table->curr)++] = *(struct arp_cell*)cell;
-  }
-
-  if (cell_type == arp) {
-
+    struct arp_cell entry = *(struct arp_cell*)cell;
+    ((struct arp_cell*)table->tbl)[(table->curr)++] = entry;
   }
 
   return ADD_SUCCESS;
 }
 
-int compare_route_entries(const void* e1, const void* e2) {
+int compare_route_entries(const void* e1, const void* e2)
+{
   return (((struct route_cell*)e1)->prefix == ((struct route_cell*)e2)->prefix?
-            ((struct route_cell*)e2)->mask - ((struct route_cell*)e1)->mask :
-            (uint32_t)((struct route_cell*)e1)->prefix - (uint32_t)((struct route_cell*)e2)->prefix);
+          ((struct route_cell*)e2)->mask - ((struct route_cell*)e1)->mask :
+          ((struct route_cell*)e1)->prefix - ((struct route_cell*)e2)->prefix);
 }
 
-int compare_arp_entries(const void* e1, const void* e2) {
-  return  ((uint32_t)((struct arp_cell*)e1)->ip -
-          (uint32_t)((struct arp_cell*)e2)->ip);
+int compare_arp_entries(const void* e1, const void* e2)
+{
+  return (((struct arp_cell*)e1)->ip - ((struct arp_cell*)e2)->ip);
 }
 
-void sort_table(struct table* table, size_t cell_type) {
+void sort_table(struct table* table, size_t cell_type)
+{
   fprintf(stdout, "Sorting table...\n");
   if (!table || !table->tbl) {
     return;
@@ -133,7 +140,8 @@ void sort_table(struct table* table, size_t cell_type) {
   fprintf(stdout, "Table sorted!\n");
 }
 
-int get_next_hop(struct table* table, uint32_t destination) {
+int get_next_hop(struct table* table, uint32_t destination)
+{
   int low = 0, hi = table->curr;
 
   while (low <= hi) {
@@ -155,7 +163,8 @@ int get_next_hop(struct table* table, uint32_t destination) {
   return -1;
 }
 
-int find_entry(struct table* table, uint32_t destination, size_t cell_type) {
+int find_entry(struct table* table, uint32_t destination, size_t cell_type)
+{
   for (size_t i = 0; i < table->curr; i++) {
     uint32_t possible_prefix =
       destination & ((struct route_cell*)table->tbl)[i].mask;
@@ -175,7 +184,8 @@ int find_entry(struct table* table, uint32_t destination, size_t cell_type) {
   return -1;
 }
 
-void print_route_table(struct table* table) {
+void print_route_table(struct table* table)
+{
   FILE* out = fopen("rtable_out.txt", "w");
 
   fprintf(out, "Routing table:\n");
@@ -186,7 +196,8 @@ void print_route_table(struct table* table) {
   fclose(out);
 }
 
-void print_route_entry(FILE* out, struct table* table, size_t i) {
+void print_route_entry(FILE* out, struct table* table, size_t i)
+{
   struct in_addr addr;
   fprintf(out, "table[%ld]\n", i);
   addr.s_addr = ((struct route_cell*)table->tbl)[i].prefix;
@@ -201,7 +212,8 @@ void print_route_entry(FILE* out, struct table* table, size_t i) {
   fprintf(out, "Interface: %ld\n", ((struct route_cell*)table->tbl)[i].interface);
 }
 
-uint16_t checksum(void *vdata, size_t length) {
+uint16_t checksum(void *vdata, size_t length)
+{
 	// Cast the data pointer to one that can be indexed.
 	char* data=(char*)vdata;
 
