@@ -4,6 +4,27 @@
 
 using namespace std;
 
+#define IP_WRNG_CHECK 0xef
+#define IP_VALID_PKT 0xdf
+
+uint8_t check_packet(packet m) {
+	struct iphdr* ip_hdr =
+		(struct iphdr*)(m.payload + sizeof(struct ether_header));
+	struct icmphdr* icmp_hdr = (struct icmphdr*)(m.payload 	+
+		sizeof(struct ether_header) + sizeof(struct iphdr));
+
+	
+
+	return 0;
+}
+
+void update_packet(packet& m) {
+	struct iphdr* ip_hdr = (struct iphdr*)(m.payload + sizeof(struct ether_header));
+	(ip_hdr->ttl)--;
+	ip_hdr->check = 0;
+	ip_hdr->check = checksum(ip_hdr, sizeof(struct iphdr));
+}
+
 int main(int argc, char *argv[])
 {
 	packet m;
@@ -38,6 +59,17 @@ int main(int argc, char *argv[])
 		fprintf(stdout, "Packet received!\n");
 
 		struct ether_header* eth_hdr = (struct ether_header*)m.payload;
+		uint8_t router_physical[6];
+		uint8_t broadcast[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+		get_interface_mac(m.interface, router_physical);
+		/* Check if packet was meant for router */
+		if (memcmp(eth_hdr->ether_dhost, router_physical, 6) &&
+			memcmp(eth_hdr->ether_dhost, broadcast, 6) &&
+			memcmp(eth_hdr->ether_shost, router_physical, 6) == 0) {
+			fprintf(stdout, "Packet not for router!\n");
+			continue;
+		}
+		
 		/* Check protocol type */
 		uint32_t protocol = htons(eth_hdr->ether_type);
 		/* IP */
@@ -47,18 +79,25 @@ int main(int argc, char *argv[])
 			struct icmphdr* icmp_hdr = (struct icmphdr*)(m.payload 	+
 				sizeof(struct ether_header) + sizeof(struct iphdr));
 
-			fprintf (stdout, "\tIt's an IP packet coming on interface %d ip %s!\n",
-							m.interface, get_interface_ip(m.interface));
+			fprintf(stdout,
+					"\tIt's an IP packet coming on interface %d ip %s!\n",
+					m.interface, get_interface_ip(m.interface));
 			addr.s_addr = ip_hdr->daddr;
-			printf("\ttarget ip: %s\n", inet_ntoa(addr));
+			fprintf(stdout, "\ttarget ip: %s\n", inet_ntoa(addr));
 
 			uint32_t target = ip_hdr->daddr;
-			struct in_addr* router_ip = (struct in_addr*)malloc(sizeof(struct in_addr));
-			inet_aton(get_interface_ip(m.interface), router_ip);
-			uint32_t router = router_ip->s_addr;
+			struct in_addr* router_ip;
+			router_ip = (struct in_addr*)malloc(sizeof(struct in_addr));
+			inet_aton(get_interface_ip(m.interface), addr);
+			uint32_t router = router_ip>s_addr;
 
 			uint8_t reply_type = 0xff;
 			int index;
+
+			uint16_t ip_checksum;
+			uint16_t old_ip_checksum = ip_hdr->check;
+			ip_hdr->check = 0;
+			ip_checksum = checksum(ip_hdr, sizeof(struct iphdr));
 
 			if (	target == router &&
 						ip_hdr->protocol == 1 &&
@@ -74,14 +113,16 @@ int main(int argc, char *argv[])
 				/* Look for next hop */
 				reply_type = ICMP_DEST_UNREACH;
 				printf("\tNot found in rtable! %u\n", ICMP_DEST_UNREACH);
+			} else if (ip_checksum != old_ip_checksum) {
+				continue;
 			} else {
 				/* It's a valid packet */
 				/* Try to forward packet */
 				while (	index > 0 &&
-								((struct route_cell*)rtable->tbl)[index].prefix ==
-									((struct route_cell*)rtable->tbl)[index-1].prefix &&
-								((struct route_cell*)rtable->tbl)[index].mask <
-									((struct route_cell*)rtable->tbl)[index-1].mask)
+						((struct route_cell*)rtable->tbl)[index].prefix ==
+							((struct route_cell*)rtable->tbl)[index-1].prefix &&
+						((struct route_cell*)rtable->tbl)[index].mask <
+							((struct route_cell*)rtable->tbl)[index-1].mask)
 				{
 					/* Longest prefix match */
 					printf("STILL LOOKING...\n");
@@ -132,6 +173,8 @@ int main(int argc, char *argv[])
 				for (size_t i = 0; i < 6; i++) {
 					eth_hdr->ether_dhost[i] = ((struct arp_cell*)arp_table->tbl)[arp_index].mac[i];
 				}
+				update_packet(m);
+				// send_packet(m.interface, &m);
 			}
 
 			if (reply_type == ICMP_ECHOREPLY) {
@@ -252,6 +295,7 @@ int main(int argc, char *argv[])
 							eth_hdr->ether_dhost[i] = new_entry.mac[i];
 						}
 
+						// update_packet(m);
 						send_packet(m.interface, &m);
 
 						front = q.front();
