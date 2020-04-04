@@ -78,34 +78,78 @@ void create_icmp_packet(packet &m, char* payload, uint8_t icmp_type)
 	/* Sending back ICMP message */
 	printf("\tSending back ICMP message with type: %u\n", icmp_type);
 	/* Update ICMP type to ECHOREPLY */
-	icmp_hdr->type = icmp_type;
-	icmp_hdr->code = 0;
+	icmp_hdr->type = 	icmp_type;
+	icmp_hdr->code = 	0;
 	/* Change protocol to ICMP */
-	ip_hdr->protocol = IPPROTO_ICMP;
+	ip_hdr->protocol = 	IPPROTO_ICMP;
 	/* Switch destination and source IP in IP header */
-	uint32_t aux = ip_hdr->saddr;
-	ip_hdr->saddr = ip_hdr->daddr;
-	ip_hdr->daddr = aux;
+	uint32_t aux = 		ip_hdr->saddr;
+	ip_hdr->saddr = 	ip_hdr->daddr;
+	ip_hdr->daddr = 	aux;
 	/* Update source and destination MAC in the Ethernet header */
 	copy_mac(eth_hdr->ether_dhost, eth_hdr->ether_shost);
 	get_interface_mac(m.interface, eth_hdr->ether_shost);
 	/* Update IP and packet length */
 	if (icmp_type != ICMP_ECHOREPLY) {
-		ip_hdr->tot_len = htons(2 * IPHD_S + ICMPHD_S + 8);
-		m.len = ETHD_S + 2 * IPHD_S + ICMPHD_S + 8;
+		ip_hdr->tot_len = 	htons(2 * IPHD_S + ICMPHD_S + 8);
+		m.len = 			ETHD_S + 2 * IPHD_S + ICMPHD_S + 8;
 	}
 	/* Update checksums */
-	ip_hdr->check = 0;
-	ip_hdr->check = checksum(ip_hdr, IPHD_S);
-	icmp_hdr->checksum = 0;
-	icmp_hdr->checksum = checksum(icmp_hdr, ICMPHD_S + IPHD_S + 8);
+	ip_hdr->check = 	0;
+	ip_hdr->check = 	checksum(ip_hdr, IPHD_S);
+	icmp_hdr->checksum = 	0;
+	icmp_hdr->checksum = 	checksum(icmp_hdr, ICMPHD_S + IPHD_S + 8);
+}
+
+void create_arp_packet(	packet &m,
+						char* payload,
+						uint8_t arpop,
+						uint32_t target,
+						uint32_t router)
+{
+	struct ether_header* eth_hdr = (struct ether_header*)payload;
+	struct ether_arp* arp_hdr = (struct ether_arp*)(payload + ETHD_S);
+
+	if (arpop == ARPOP_REQUEST) {
+		/* Update source MAC and set destination to broadcast */
+		get_interface_mac(m.interface, eth_hdr->ether_shost);
+		get_interface_mac(m.interface, arp_hdr->arp_sha);
+		for (size_t i = 0; i < 6; i++) {
+			eth_hdr->ether_dhost[i] = 	0xff;
+			arp_hdr->arp_tha[i] = 		0x00;
+		}
+		/* Update Ethernet protocol type */
+		eth_hdr->ether_type = 			ntohs(ETHERTYPE_ARP);
+		/* Create ARP header */
+		(arp_hdr->ea_hdr).ar_hrd = 		ntohs(ARPHRD_ETHER);
+		(arp_hdr->ea_hdr).ar_pro = 		ntohs(ETHERTYPE_IP);
+		(arp_hdr->ea_hdr).ar_hln = 		6;
+		(arp_hdr->ea_hdr).ar_pln = 		4;
+		(arp_hdr->ea_hdr).ar_op = 		ntohs(ARPOP_REQUEST);
+
+		*(uint32_t*)(arp_hdr->arp_spa) =	router;
+		*(uint32_t*)(arp_hdr->arp_tpa) =	target;
+		/* Update package length */
+		m.len = ETHD_S + ARPHD_S;
+	} else if (arpop == ARPOP_REPLY) {
+		uint32_t aux = 						*(uint32_t*)(arp_hdr->arp_tpa);
+		*(uint32_t*)(arp_hdr->arp_tpa) = 	*(uint32_t*)(arp_hdr->arp_spa);
+		*(uint32_t*)(arp_hdr->arp_spa) = 	aux;
+		/* Copy source MAC in the target MAC */
+		copy_mac(arp_hdr->arp_tha, arp_hdr->arp_sha);
+		copy_mac(eth_hdr->ether_dhost, arp_hdr->arp_sha);
+		/* Update source MAC to be the router's */
+		get_interface_mac(m.interface, eth_hdr->ether_shost);
+		get_interface_mac(m.interface, arp_hdr->arp_sha);
+		/* Update request type */
+		arp_hdr->ea_hdr.ar_op = 			htons(ARPOP_REPLY);
+	}
 }
 
 int main(int argc, char *argv[])
 {
 	packet m;
 	int rc;
-	struct in_addr addr;
 
 	struct table* rtable = create_table(route);
 	struct table* arp_table = create_table(arp);
@@ -125,7 +169,7 @@ int main(int argc, char *argv[])
 	init();
 
 	for (int i = 0; i < 4; i++) {
-		printf("Router interface: %d ip %s\n", i, get_interface_ip(i));
+		fprintf(stdout, "Router interface: %d ip %s\n", i, get_interface_ip(i));
 	}
 
 	fprintf(stdout, "Waiting for packets...\n");
@@ -148,12 +192,8 @@ int main(int argc, char *argv[])
 		
 		/* Check protocol type */
 		uint32_t protocol = htons(eth_hdr->ether_type);
-		/* IP */
 		if (protocol == ETHERTYPE_IP) {
-			struct iphdr* ip_hdr =
-				(struct iphdr*)(m.payload + ETHD_S);
-			struct icmphdr* icmp_hdr =
-				(struct icmphdr*)(m.payload + ETHD_S + IPHD_S);
+			struct iphdr* ip_hdr = (struct iphdr*)(m.payload + ETHD_S);
 
 			uint32_t target = ip_hdr->daddr;
 
@@ -162,20 +202,15 @@ int main(int argc, char *argv[])
 			inet_aton(get_interface_ip(m.interface), router_ip);
 			uint32_t router = router_ip->s_addr;
 
-			fprintf(stdout,
-					"\tIt's an IP packet coming on interface %d ip %s!\n",
-					m.interface, get_interface_ip(m.interface));
-			addr.s_addr = ip_hdr->daddr;
-			fprintf(stdout, "\ttarget ip: %s\n", inet_ntoa(addr));
-
 			vld pkt_validity = check_pkt(m, rtable, target, router);
 
 			if (pkt_validity.reply_type == IP_WRNG_CHECK) {
+				/* Drop packets with wrong checksums */
 				continue;
 			} else if (pkt_validity.reply_type == IP_VALID_PKT) {
 				/* 
 				 * It's a valid packet.
-				 * Try to forward packet.
+				 * Try to forward the packet.
 				 */
 				printf("\tNext hop:\n");
 				print_route_entry(stdout, rtable, pkt_validity.index);
@@ -190,32 +225,10 @@ int main(int argc, char *argv[])
 				uint32_t next_hop = get_entry_next_hop(rtable, pkt_validity.index);
 
 				if ((arp_index = find_entry(arp_table, next_hop, arp)) < 0) {
-					/* Entry not foudn in ARP table */
-					/* Enqueue packet to send when ARP Reply is received */
-					struct ether_arp* arp_hdr =
-						(struct ether_arp*)(m.payload + ETHD_S);
-					/* Update source MAC and set destination to broadcast */
-					get_interface_mac(m.interface, eth_hdr->ether_shost);
-					get_interface_mac(m.interface, arp_hdr->arp_sha);
-
-					for (size_t i = 0; i < 6; i++) {
-						eth_hdr->ether_dhost[i] = 	0xff;
-						arp_hdr->arp_tha[i] = 		0x00;
-					}
-					/* Update Ethernet protocol type */
-					eth_hdr->ether_type = 			ntohs(ETHERTYPE_ARP);
-					/* Create ARP header */
-					(arp_hdr->ea_hdr).ar_hrd = 		ntohs(ARPHRD_ETHER);
-					(arp_hdr->ea_hdr).ar_pro = 		ntohs(ETHERTYPE_IP);
-					(arp_hdr->ea_hdr).ar_hln = 		6;
-					(arp_hdr->ea_hdr).ar_pln = 		4;
-					(arp_hdr->ea_hdr).ar_op = 		ntohs(ARPOP_REQUEST);
-
-					*(uint32_t*)(arp_hdr->arp_spa) =	router;
-					*(uint32_t*)(arp_hdr->arp_tpa) =	target;
-					/* Update package length */
-					m.len = ETHD_S + ARPHD_S;
 					/* Send packet */
+					create_arp_packet(	m, m.payload,
+										ARPOP_REQUEST,
+										target, router);
 					send_packet(m.interface, &m);
 					continue;
 				}
@@ -226,44 +239,22 @@ int main(int argc, char *argv[])
 				create_icmp_packet(m, m.payload, pkt_validity.reply_type);
 			}
 			send_packet(m.interface, &m);
-		/* ARP */
 		} else if (protocol == ETHERTYPE_ARP) {
 			struct ether_arp* arp_hdr =
 				(struct ether_arp*)(m.payload + ETHD_S);
 
+			uint32_t target = *(uint32_t*)(arp_hdr->arp_tpa);
+			struct in_addr* router_ip;
+			router_ip = (struct in_addr*)malloc(sizeof(struct in_addr));
+			inet_aton(get_interface_ip(m.interface), router_ip);
+			uint32_t router = router_ip->s_addr;
+
 			uint8_t op = htons((arp_hdr->ea_hdr).ar_op);
 
-			fprintf (stdout, "\tIt's an ARP %d coming on interface %d ip %s!\n", op,
-							m.interface, get_interface_ip(m.interface));
-			addr.s_addr = *(uint32_t*)(arp_hdr->arp_tpa);
-			printf("\ttarget ip: %s\n", inet_ntoa(addr));
-
-			if (op == ARPOP_REQUEST) {
-				/* ARP Request */
-				uint32_t target = *(uint32_t*)(arp_hdr->arp_tpa);
-				struct in_addr* router_ip = (struct in_addr*)malloc(sizeof(struct in_addr));
-				inet_aton(get_interface_ip(m.interface), router_ip);
-				uint32_t router = router_ip->s_addr;
-
-				if (target == router) {
-					fprintf(stdout, "\tARP Request is targetting router\n");
-					/* Switch target and source IP */
-					uint32_t aux = *(uint32_t*)(arp_hdr->arp_tpa);
-					*(uint32_t*)(arp_hdr->arp_tpa) = *(uint32_t*)(arp_hdr->arp_spa);
-					*(uint32_t*)(arp_hdr->arp_spa) = aux;
-					/* Copy source MAC in the target MAC */
-					copy_mac(arp_hdr->arp_tha, arp_hdr->arp_sha);
-					copy_mac(eth_hdr->ether_dhost, arp_hdr->arp_sha);
-					/* Update source MAC to be the router's */
-					get_interface_mac(m.interface, eth_hdr->ether_shost);
-					get_interface_mac(m.interface, arp_hdr->arp_sha);
-					/* Update request type */
-					arp_hdr->ea_hdr.ar_op = htons(ARPOP_REPLY);
-					/* Send back ARP Reply*/
-					send_packet(m.interface, &m);
-				}
+			if (op == ARPOP_REQUEST && target == router) {
+				create_arp_packet(m, m.payload, ARPOP_REPLY, target, router);
+				send_packet(m.interface, &m);
 			} else if (op == ARPOP_REPLY) {
-				/* ARP Reply */
 				uint32_t source = htonl(*(uint32_t*)arp_hdr->arp_spa);
 				int index;
 
@@ -280,7 +271,8 @@ int main(int argc, char *argv[])
 						(struct iphdr*)(front.payload + ETHD_S);
 					uint32_t front_target = htonl(ip_hdr->daddr);
 					uint32_t target = source;
-					while(front_target == target) {
+
+					while (front_target == target) {
 						q.pop();
 
 						m.interface = front.interface;
@@ -288,7 +280,6 @@ int main(int argc, char *argv[])
 						memcpy(m.payload, front.payload, m.len);
 						copy_mac(eth_hdr->ether_dhost, new_entry.mac);
 
-						// update_packet(m);
 						send_packet(m.interface, &m);
 
 						front = q.front();

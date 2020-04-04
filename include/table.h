@@ -38,8 +38,8 @@ struct table {
 };
 
 enum cell_types {
-	route = sizeof(struct route_cell),
-	arp = sizeof(struct arp_cell)
+	route = 	sizeof(struct route_cell),
+	arp = 		sizeof(struct arp_cell)
 };
 
 struct table* create_table(size_t cell_size);
