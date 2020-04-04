@@ -11,13 +11,13 @@
 #include <arpa/inet.h>
 #include <netinet/if_ether.h>
 
-#define TABLE_INITIAL_SIZE 256
+#define TABLE_INITIAL_SIZE 	256
 
-#define ADD_SUCCESS 0
-#define ADD_FAIL 1
+#define ADD_SUCCESS 		0
+#define ADD_FAIL 			1
 
-#define READ_SUCCES 0
-#define READ_FAIL 1
+#define READ_SUCCES 		0
+#define READ_FAIL 			1
 
 struct route_cell {
 	uint32_t prefix;
@@ -28,7 +28,7 @@ struct route_cell {
 
 struct arp_cell {
 	uint32_t ip;
-	char mac[6];
+	uint8_t mac[6];
 };
 
 struct table {
@@ -49,6 +49,9 @@ uint32_t get_entry_prefix(struct table* table, size_t index);
 uint32_t get_entry_next_hop(struct table* table, size_t index);
 uint32_t get_entry_mask(struct table* table, size_t index);
 size_t get_entry_interface(struct table* table, size_t index);
+
+uint8_t* get_mac(struct table* table, size_t index);
+void copy_mac(uint8_t destination[], uint8_t source[]);
 
 int read_route_table(struct table* table, const char* in);
 void sort_table(struct table* table, size_t cell_type);

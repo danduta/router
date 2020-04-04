@@ -208,7 +208,7 @@ void print_route_table(struct table* table)
 void print_route_entry(FILE* out, struct table* table, size_t i)
 {
   struct in_addr addr;
-  fprintf(out, "table[%ld]\n", i);
+  fprintf(out, "\t\ttable[%ld]\n", i);
   addr.s_addr = ((struct route_cell*)table->tbl)[i].prefix;
   addr.s_addr = ntohl(addr.s_addr);
   fprintf(out, "\tPrefix: %s, ", inet_ntoa(addr));
@@ -274,16 +274,32 @@ uint16_t checksum(void *vdata, size_t length)
 	return htons(~acc);
 }
 
-uint32_t get_entry_prefix(struct table* table, size_t index) {
+uint32_t get_entry_prefix(struct table* table, size_t index)
+{
   return ((struct route_cell*)table->tbl)[index].prefix;
 }
-uint32_t get_entry_next_hop(struct table* table, size_t index) {
+uint32_t get_entry_next_hop(struct table* table, size_t index)
+{
   return ((struct route_cell*)table->tbl)[index].next_hop;
 }
-uint32_t get_entry_mask(struct table* table, size_t index) {
+uint32_t get_entry_mask(struct table* table, size_t index)
+{
   return ((struct route_cell*)table->tbl)[index].mask;
 }
 
-size_t get_entry_interface(struct table* table, size_t index) {
+size_t get_entry_interface(struct table* table, size_t index)
+{
   return ((struct route_cell*)table->tbl)[index].interface;
+}
+
+uint8_t* get_mac(struct table* table, size_t index)
+{
+  return ((struct arp_cell*)table->tbl)[index].mac;
+}
+
+void copy_mac(uint8_t destination[], uint8_t source[])
+{
+	for (size_t i = 0; i < 6; i++) {
+		destination[i] = source[i];
+	}
 }
