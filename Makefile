@@ -1,5 +1,5 @@
 PROJECT=router
-SOURCES=list.c skel.c table.c
+SOURCES=skel.c table.c
 SOURCES-CPP=router.cpp
 LIBRARY=nope
 INCPATHS=include
