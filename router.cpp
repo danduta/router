@@ -155,6 +155,9 @@ int main(int argc, char *argv[])
 	struct table* arp_table = create_table(arp);
 	queue<packet> q;
 
+	uint8_t router_physical[6];
+	uint8_t broadcast[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+
 	if (!rtable || !arp_table) {
 		fprintf(stderr, "Cannot allocate memory for routing table.\n");
 		return -1;
@@ -179,8 +182,7 @@ int main(int argc, char *argv[])
 		fprintf(stdout, "Packet received!\n");
 
 		struct ether_header* eth_hdr = (struct ether_header*)m.payload;
-		uint8_t router_physical[6];
-		uint8_t broadcast[] = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
+
 		get_interface_mac(m.interface, router_physical);
 		/* Check if packet was meant for router */
 		if (memcmp(eth_hdr->ether_dhost, router_physical, 6) &&
@@ -290,6 +292,11 @@ int main(int argc, char *argv[])
 			}
 		}
 	}
+
+	free(rtable->tbl);
+	free(arp_table->tbl);
+	free(rtable);
+	free(arp_table);
 
 	return 0;
 }
