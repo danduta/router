@@ -91,13 +91,14 @@ int add_entry(struct table* table, void* cell, size_t cell_type)
   }
 
   if (table->curr == table->size - 1) {
-    int new_size = 2 * table->size * cell_type;
-    table->tbl = realloc(table->tbl, new_size);
-
-    if (!table->tbl) {
+		int new_size = 2 * table->size * cell_type;
+		void* new_tbl = realloc(table->tbl, new_size);
+		
+    if (!new_tbl) {
       return ADD_FAIL;
     }
-
+		
+		table->tbl = new_tbl;
     table->size *= 2;
   }
 
